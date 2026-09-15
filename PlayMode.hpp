@@ -25,23 +25,30 @@ struct PlayMode : Mode {
 		uint8_t pressed = 0;
 	} left, right, down, up;
 
+	struct Tile {
+		Scene::Transform *transform = nullptr;
+		glm::vec2 center = glm::vec2(0.0f);
+		float radius = 2.5f;
+		float top_z = 0.3f;
+	};
+	Tile tiles[4];
+	int tile_under_player() const;
+
+	Scene::Transform *player = nullptr;
+
+	float gravity = -25.0f;
+	float jumpSpeed = 10.0f;
+	float yaw = 0.0f;
+	float pitch = 0.0f;
+	float ground_eye_z = 4.0f;
+	float eye_height = 4.0f;
+	float eye_z = 4.0f;
+	float z_velocity = 0.0f;
+	bool on_ground = true;
+	float mouse_sen = 2.5f;
+
 	//local copy of the game scene (so code can change it during gameplay):
 	Scene scene;
-
-	//hexapod leg to wobble:
-	Scene::Transform *hip = nullptr;
-	Scene::Transform *upper_leg = nullptr;
-	Scene::Transform *lower_leg = nullptr;
-	glm::quat hip_base_rotation;
-	glm::quat upper_leg_base_rotation;
-	glm::quat lower_leg_base_rotation;
-	float wobble = 0.0f;
-
-	glm::vec3 get_leg_tip_position();
-
-	//music coming from the tip of the leg (as a demonstration):
-	std::shared_ptr< Sound::PlayingSample > leg_tip_loop;
-
 	//car honk sound:
 	std::shared_ptr< Sound::PlayingSample > honk_oneshot;
 	

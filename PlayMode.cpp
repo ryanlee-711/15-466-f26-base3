@@ -12,23 +12,23 @@
 
 #include <random>
 
-GLuint hexapod_meshes_for_lit_color_texture_program = 0;
-Load< MeshBuffer > hexapod_meshes(LoadTagDefault, []() -> MeshBuffer const * {
-	MeshBuffer const *ret = new MeshBuffer(data_path("hexapod.pnct"));
-	hexapod_meshes_for_lit_color_texture_program = ret->make_vao_for_program(lit_color_texture_program->program);
+GLuint room_meshes_for_lit_color_texture_program = 0;
+Load< MeshBuffer > room_meshes(LoadTagDefault, []() -> MeshBuffer const * {
+	MeshBuffer const *ret = new MeshBuffer(data_path("Room.pnct"));
+	room_meshes_for_lit_color_texture_program = ret->make_vao_for_program(lit_color_texture_program->program);
 	return ret;
 });
 
-Load< Scene > hexapod_scene(LoadTagDefault, []() -> Scene const * {
-	return new Scene(data_path("hexapod.scene"), [&](Scene &scene, Scene::Transform *transform, std::string const &mesh_name){
-		Mesh const &mesh = hexapod_meshes->lookup(mesh_name);
+Load< Scene > room_scene(LoadTagDefault, []() -> Scene const * {
+	return new Scene(data_path("Room.scene"), [&](Scene &scene, Scene::Transform *transform, std::string const &mesh_name){
+		Mesh const &mesh = room_meshes->lookup(mesh_name);
 
 		scene.drawables.emplace_back(transform);
 		Scene::Drawable &drawable = scene.drawables.back();
 
 		drawable.pipeline = lit_color_texture_program_pipeline;
 
-		drawable.pipeline.vao = hexapod_meshes_for_lit_color_texture_program;
+		drawable.pipeline.vao = room_meshes_for_lit_color_texture_program;
 		drawable.pipeline.type = mesh.type;
 		drawable.pipeline.start = mesh.start;
 		drawable.pipeline.count = mesh.count;
@@ -36,38 +36,43 @@ Load< Scene > hexapod_scene(LoadTagDefault, []() -> Scene const * {
 	});
 });
 
-Load< Sound::Sample > dusty_floor_sample(LoadTagDefault, []() -> Sound::Sample const * {
-	return new Sound::Sample(data_path("dusty-floor.opus"));
-});
+// Load< Sound::Sample > dusty_floor_sample(LoadTagDefault, []() -> Sound::Sample const * {
+// 	return new Sound::Sample(data_path("dusty-floor.opus"));
+// });
 
 
-Load< Sound::Sample > honk_sample(LoadTagDefault, []() -> Sound::Sample const * {
-	return new Sound::Sample(data_path("honk.wav"));
-});
+// Load< Sound::Sample > honk_sample(LoadTagDefault, []() -> Sound::Sample const * {
+// 	return new Sound::Sample(data_path("honk.wav"));
+// });
 
 
-PlayMode::PlayMode() : scene(*hexapod_scene) {
-	//get pointers to leg for convenience:
+PlayMode::PlayMode() : scene(*room_scene) {
+	static char const *tile_names[4] = { "Tile.Red", "Tile.Blue", "Tile.Green", "Tile.Yellow" };
 	for (auto &transform : scene.transforms) {
-		if (transform.name == "Hip.FL") hip = &transform;
-		else if (transform.name == "UpperLeg.FL") upper_leg = &transform;
-		else if (transform.name == "LowerLeg.FL") lower_leg = &transform;
+		if (transform.name == "Player") player = &transform;
+		else if (transform.name == tile_names[0]) tiles[0].transform = &transform;
+		else if (transform.name == tile_names[1]) tiles[1].transform = &transform;
+		else if (transform.name == tile_names[2]) tiles[2].transform = &transform;
+		else if (transform.name == tile_names[3]) tiles[3].transform = &transform;
 	}
-	if (hip == nullptr) throw std::runtime_error("Hip not found.");
-	if (upper_leg == nullptr) throw std::runtime_error("Upper leg not found.");
-	if (lower_leg == nullptr) throw std::runtime_error("Lower leg not found.");
+	if (player == nullptr) throw std::runtime_error("Player not found.");
+	if (tiles[0].transform == nullptr) throw std::runtime_error("Red Tile not found.");
+	if (tiles[1].transform == nullptr) throw std::runtime_error("Blue Tile not found.");
+	if (tiles[2].transform == nullptr) throw std::runtime_error("Green Tile not found.");
+	if (tiles[3].transform == nullptr) throw std::runtime_error("Yellow Tile not found.");
 
-	hip_base_rotation = hip->rotation;
-	upper_leg_base_rotation = upper_leg->rotation;
-	lower_leg_base_rotation = lower_leg->rotation;
+	for (int i = 0; i < 4; i++) {
+		tiles[i].center = glm::vec2(tiles[i].transform->position);
+	}
 
 	//get pointer to camera for convenience:
 	if (scene.cameras.size() != 1) throw std::runtime_error("Expecting scene to have exactly one camera, but it has " + std::to_string(scene.cameras.size()));
 	camera = &scene.cameras.front();
+	ground_eye_z = camera->transform->position.z;
+	eye_z = ground_eye_z;
+
 
 	//start music loop playing:
-	// (note: position will be over-ridden in update())
-	leg_tip_loop = Sound::loop_3D(*dusty_floor_sample, 1.0f, get_leg_tip_position(), 10.0f);
 }
 
 PlayMode::~PlayMode() {
@@ -96,8 +101,11 @@ bool PlayMode::handle_event(SDL_Event const &evt, glm::uvec2 const &window_size)
 			down.pressed = true;
 			return true;
 		} else if (evt.key.key == SDLK_SPACE) {
-			if (honk_oneshot) honk_oneshot->stop();
-			honk_oneshot = Sound::play_3D(*honk_sample, 0.3f, glm::vec3(4.6f, -7.8f, 6.9f)); //hardcoded position of front of car, from blender
+			if (on_ground) {
+				z_velocity = jumpSpeed;
+				on_ground = false;
+			}
+			return true;
 		}
 	} else if (evt.type == SDL_EVENT_KEY_UP) {
 		if (evt.key.key == SDLK_A) {
@@ -124,11 +132,13 @@ bool PlayMode::handle_event(SDL_Event const &evt, glm::uvec2 const &window_size)
 				evt.motion.xrel / float(window_size.y),
 				-evt.motion.yrel / float(window_size.y)
 			);
-			camera->transform->rotation = glm::normalize(
-				camera->transform->rotation
-				* glm::angleAxis(-motion.x * camera->fovy, glm::vec3(0.0f, 1.0f, 0.0f))
-				* glm::angleAxis(motion.y * camera->fovy, glm::vec3(1.0f, 0.0f, 0.0f))
-			);
+			yaw   += -motion.x * camera->fovy * mouse_sen;
+			pitch +=  motion.y * camera->fovy * mouse_sen;
+			pitch = glm::clamp(pitch, -1.4f, 1.4f);
+
+			camera->transform->rotation =
+				glm::angleAxis(yaw, glm::vec3(0.0f, 0.0f, 1.0f))
+				* glm::angleAxis(pitch + 1.5707963f, glm::vec3(1.0f, 0.0f, 0.0f));
 			return true;
 		}
 	}
@@ -138,31 +148,10 @@ bool PlayMode::handle_event(SDL_Event const &evt, glm::uvec2 const &window_size)
 
 void PlayMode::update(float elapsed) {
 
-	//slowly rotates through [0,1):
-	wobble += elapsed / 10.0f;
-	wobble -= std::floor(wobble);
-
-	hip->rotation = hip_base_rotation * glm::angleAxis(
-		glm::radians(5.0f * std::sin(wobble * 2.0f * float(M_PI))),
-		glm::vec3(0.0f, 1.0f, 0.0f)
-	);
-	upper_leg->rotation = upper_leg_base_rotation * glm::angleAxis(
-		glm::radians(7.0f * std::sin(wobble * 2.0f * 2.0f * float(M_PI))),
-		glm::vec3(0.0f, 0.0f, 1.0f)
-	);
-	lower_leg->rotation = lower_leg_base_rotation * glm::angleAxis(
-		glm::radians(10.0f * std::sin(wobble * 3.0f * 2.0f * float(M_PI))),
-		glm::vec3(0.0f, 0.0f, 1.0f)
-	);
-
-	//move sound to follow leg tip position:
-	leg_tip_loop->set_position(get_leg_tip_position(), 1.0f / 60.0f);
-
 	//move camera:
 	{
-
 		//combine inputs into a move:
-		constexpr float PlayerSpeed = 30.0f;
+		constexpr float PlayerSpeed = 12.0f;
 		glm::vec2 move = glm::vec2(0.0f);
 		if (left.pressed && !right.pressed) move.x =-1.0f;
 		if (!left.pressed && right.pressed) move.x = 1.0f;
@@ -174,10 +163,39 @@ void PlayMode::update(float elapsed) {
 
 		glm::mat4x3 frame = camera->transform->make_parent_from_local();
 		glm::vec3 frame_right = frame[0];
-		//glm::vec3 up = frame[1];
 		glm::vec3 frame_forward = -frame[2];
 
+		frame_right.z = 0.0f;
+		frame_forward.z = 0.0f;
+		if (frame_right != glm::vec3(0.0f)) frame_right = glm::normalize(frame_right);
+		if (frame_forward != glm::vec3(0.0f)) frame_forward = glm::normalize(frame_forward);
+
 		camera->transform->position += move.x * frame_right + move.y * frame_forward;
+
+		//keep the player inside the room and at eye height:
+		glm::vec3 &pos = camera->transform->position;
+		pos.x = glm::clamp(pos.x, -14.0f, 14.0f);
+		pos.y = glm::clamp(pos.y, -19.0f, 19.0f);
+	}
+
+	{ //Jump
+		float support_z = 0.0f; //floor
+		int t = tile_under_player();
+		if (t != -1) support_z = tiles[t].top_z;
+
+		float target_eye_z = support_z + eye_height;
+
+		z_velocity += gravity * elapsed;
+		eye_z += z_velocity * elapsed;
+
+		if (eye_z <= target_eye_z) {
+			eye_z = target_eye_z;
+			z_velocity = 0.0f;
+			on_ground = true;
+		} else {
+			on_ground = false;
+		}
+		camera->transform->position.z = eye_z;
 	}
 
 	{ //update listener to camera position:
@@ -185,6 +203,13 @@ void PlayMode::update(float elapsed) {
 		glm::vec3 frame_right = frame[0];
 		glm::vec3 frame_at = frame[3];
 		Sound::listener.set_position_right(frame_at, frame_right, 1.0f / 60.0f);
+	}
+
+	{
+		glm::vec3 cam_pos = camera->transform->position;
+		glm::vec3 offset = glm::vec3(std::sin(yaw), -std::cos(yaw), 0.0f);
+		player->position = glm::vec3(cam_pos.x, cam_pos.y, cam_pos.z - 1.8f) + offset;
+    	player->rotation = glm::angleAxis(yaw, glm::vec3(0.0f, 0.0f, 1.0f));
 	}
 
 	//reset button press counters:
@@ -215,6 +240,10 @@ void PlayMode::draw(glm::uvec2 const &drawable_size) {
 
 	scene.draw(*camera);
 
+	int t = tile_under_player();
+	static char const *names[4] = { "RED", "BLUE", "GREEN", "YELLOW" };
+	std::string status = (t == -1 ? "none" : names[t]);
+
 	{ //use DrawLines to overlay some text:
 		glDisable(GL_DEPTH_TEST);
 		float aspect = float(drawable_size.x) / float(drawable_size.y);
@@ -226,12 +255,12 @@ void PlayMode::draw(glm::uvec2 const &drawable_size) {
 		));
 
 		constexpr float H = 0.09f;
-		lines.draw_text("Mouse motion rotates camera; WASD moves; escape ungrabs mouse",
+		lines.draw_text("Mouse motion rotates camera; WASD moves, Tile: " + status,
 			glm::vec3(-aspect + 0.1f * H, -1.0 + 0.1f * H, 0.0),
 			glm::vec3(H, 0.0f, 0.0f), glm::vec3(0.0f, H, 0.0f),
 			glm::u8vec4(0x00, 0x00, 0x00, 0x00));
 		float ofs = 2.0f / drawable_size.y;
-		lines.draw_text("Mouse motion rotates camera; WASD moves; escape ungrabs mouse",
+		lines.draw_text("Mouse motion rotates camera; WASD moves, Tile: " + status,
 			glm::vec3(-aspect + 0.1f * H + ofs, -1.0 + + 0.1f * H + ofs, 0.0),
 			glm::vec3(H, 0.0f, 0.0f), glm::vec3(0.0f, H, 0.0f),
 			glm::u8vec4(0xff, 0xff, 0xff, 0x00));
@@ -239,7 +268,10 @@ void PlayMode::draw(glm::uvec2 const &drawable_size) {
 	GL_ERRORS();
 }
 
-glm::vec3 PlayMode::get_leg_tip_position() {
-	//the vertex position here was read from the model in blender:
-	return lower_leg->make_world_from_local() * glm::vec4(-1.26137f, -11.861f, 0.0f, 1.0f);
+int PlayMode::tile_under_player() const {
+	glm::vec2 p = glm::vec2(camera->transform->position);
+	for (int i = 0; i < 4; ++i) {
+		if (glm::length(p - tiles[i].center) < tiles[i].radius) return i;
+	}
+	return -1;
 }

@@ -50,6 +50,20 @@ Sound::Sample::Sample(std::string const &filename) {
 Sound::Sample::Sample(std::vector< float > const &data_) : data(data_) {
 }
 
+// Sound::Sample Sound::Sample::speed_up(float speed) const {
+// 	if (speed < 0.0) {
+// 		throw std::runtime_error("Invalid speed up");
+// 	}
+// 	std::vector<float> out;
+// 	out.reserve(size_t(data.size() / speed));
+// 	for (float i = 0; i + 1.0f < float(data.size()); i += speed) {
+// 		size_t x = size_t(i);
+// 		float y = i - x;
+// 		out.push_back(data[x] * (1.0f - t) + data[x+1] * t);
+// 	}
+// 	return Sample(out);
+// }
+
 
 
 void Sound::init() {

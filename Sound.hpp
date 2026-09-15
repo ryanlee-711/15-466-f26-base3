@@ -23,6 +23,9 @@ struct Sample {
 
 	//sample data is stored as 48kHz, mono, floating-point:
 	std::vector< float > data;
+
+	//Functino to speed up the audio. speed > 1 -> faster, spped < 1 -> slower
+	Sample speed_up(float speed) const;
 };
 
 //Ramp<> manages values that should be smoothly interpolated
