@@ -69,12 +69,12 @@ struct PlayMode : Mode {
 	float gap_length = 1.0f;    //pause between commands
 	uint32_t score = 0;
 
-	float hold_time[4] = { 0.0f, 0.0f, 0.0f, 0.0f }; //left, right, forward, back
+	float hold_time[4] = {0.0f, 0.0f, 0.0f, 0.0f}; //left, right, forward, back
 	float spin_accum = 0.0f;
 	bool jumped = false;
 
 	float holdRequired = 0.5f;
-	float spinRequired = 5.2f;
+	float spinRequired = 4.0f;
 	float minWindow = 0.9f;
 	float minGap = 0.25f;
 
@@ -99,8 +99,6 @@ struct PlayMode : Mode {
 
 	//local copy of the game scene (so code can change it during gameplay):
 	Scene scene;
-	//car honk sound:
-	std::shared_ptr< Sound::PlayingSample > honk_oneshot;
 	
 	//camera:
 	Scene::Camera *camera = nullptr;

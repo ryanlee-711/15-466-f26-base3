@@ -76,16 +76,16 @@ Load< Sound::Sample > spin_sample(LoadTagDefault, []() -> Sound::Sample const * 
 
 static Sound::Sample const &command_sample(PlayMode::Command cmd) {
 	switch (cmd) {
-		case PlayMode::Cmd_Jump:     return *jump_sample;
-		case PlayMode::Cmd_Red:      return *red_sample;
-		case PlayMode::Cmd_Blue:     return *blue_sample;
-		case PlayMode::Cmd_Green:    return *green_sample;
-		case PlayMode::Cmd_Yellow:   return *yellow_sample;
-		case PlayMode::Cmd_Forward:  return *forward_sample;
+		case PlayMode::Cmd_Jump: return *jump_sample;
+		case PlayMode::Cmd_Red: return *red_sample;
+		case PlayMode::Cmd_Blue: return *blue_sample;
+		case PlayMode::Cmd_Green: return *green_sample;
+		case PlayMode::Cmd_Yellow: return *yellow_sample;
+		case PlayMode::Cmd_Forward: return *forward_sample;
 		case PlayMode::Cmd_Backward: return *backward_sample;
-		case PlayMode::Cmd_Left:     return *left_sample;
-		case PlayMode::Cmd_Right:    return *right_sample;
-		case PlayMode::Cmd_Spin:     return *spin_sample;
+		case PlayMode::Cmd_Left: return *left_sample;
+		case PlayMode::Cmd_Right: return *right_sample;
+		case PlayMode::Cmd_Spin: return *spin_sample;
 		default: throw std::runtime_error("bad command");
 	}
 }
@@ -115,6 +115,8 @@ PlayMode::PlayMode() : scene(*room_scene) {
 	camera = &scene.cameras.front();
 	ground_eye_z = camera->transform->position.z;
 	eye_z = ground_eye_z;
+
+	phase_timer = 2.0f;
 
 
 	//start music loop playing:
@@ -152,11 +154,12 @@ bool PlayMode::handle_event(SDL_Event const &evt, glm::uvec2 const &window_size)
 				jumped = true;
 			}
 			return true;
-		} else if (evt.key.key == SDLK_RETURN) {
-			static std::mt19937 rng(std::random_device{}());
-			issue_command(Command(rng() % CommandCount), (rng() % 2) == 0);
-			return true;
-		}
+		} 
+		// else if (evt.key.key == SDLK_RETURN) {
+		// 	static std::mt19937 rng(std::random_device{}());
+		// 	issue_command(Command(rng() % CommandCount), (rng() % 2) == 0);
+		// 	return true;
+		// }
 	} else if (evt.type == SDL_EVENT_KEY_UP) {
 		if (evt.key.key == SDLK_A) {
 			left.pressed = false;
@@ -182,11 +185,10 @@ bool PlayMode::handle_event(SDL_Event const &evt, glm::uvec2 const &window_size)
 				evt.motion.xrel / float(window_size.y),
 				-evt.motion.yrel / float(window_size.y)
 			);
-			yaw   += -motion.x * camera->fovy * mouse_sen;
+			yaw += -motion.x * camera->fovy * mouse_sen;
 			float d = -motion.x * camera->fovy * mouse_sen;
-			if (d * spin_accum < 0.0f) spin_accum = 0.0f;
-			spin_accum += d;
-			pitch +=  motion.y * camera->fovy * mouse_sen;
+			spin_accum += std::abs(d);
+			pitch += motion.y * camera->fovy * mouse_sen;
 			pitch = glm::clamp(pitch, -1.4f, 1.4f);
 
 			camera->transform->rotation =
@@ -210,10 +212,10 @@ void PlayMode::update(float elapsed) {
 	}
 
 	if (phase == Phase_Listening) {
-		if (left.pressed)  hold_time[0] += elapsed;
+		if (left.pressed) hold_time[0] += elapsed;
 		if (right.pressed) hold_time[1] += elapsed;
-		if (up.pressed)    hold_time[2] += elapsed;
-		if (down.pressed)  hold_time[3] += elapsed;
+		if (up.pressed) hold_time[2] += elapsed;
+		if (down.pressed) hold_time[3] += elapsed;
 	}
 
 	if (phase != Phase_Dead) {
@@ -237,7 +239,6 @@ void PlayMode::update(float elapsed) {
 
 	//move camera:
 	{
-		//combine inputs into a move:
 		constexpr float PlayerSpeed = 12.0f;
 		glm::vec2 move = glm::vec2(0.0f);
 		if (left.pressed && !right.pressed) move.x =-1.0f;
@@ -245,7 +246,6 @@ void PlayMode::update(float elapsed) {
 		if (down.pressed && !up.pressed) move.y =-1.0f;
 		if (!down.pressed && up.pressed) move.y = 1.0f;
 
-		//make it so that moving diagonally doesn't go faster:
 		if (move != glm::vec2(0.0f)) move = glm::normalize(move) * PlayerSpeed * elapsed;
 
 		glm::mat4x3 frame = camera->transform->make_parent_from_local();
@@ -259,7 +259,6 @@ void PlayMode::update(float elapsed) {
 
 		camera->transform->position += move.x * frame_right + move.y * frame_forward;
 
-		//keep the player inside the room and at eye height:
 		glm::vec3 &pos = camera->transform->position;
 		pos.x = glm::clamp(pos.x, -14.0f, 14.0f);
 		pos.y = glm::clamp(pos.y, -19.0f, 19.0f);
@@ -285,7 +284,7 @@ void PlayMode::update(float elapsed) {
 		camera->transform->position.z = eye_z;
 	}
 
-	{ //update listener to camera position:
+	{
 		glm::mat4x3 frame = camera->transform->make_parent_from_local();
 		glm::vec3 frame_right = frame[0];
 		glm::vec3 frame_at = frame[3];
@@ -332,10 +331,10 @@ void PlayMode::draw(glm::uvec2 const &drawable_size) {
 		scene.draw(*camera);
 	}
 
-	static char const *cmd_names[CommandCount] = {"JUMP","RED","BLUE","GREEN","YELLOW","FORWARD","BACKWARD","LEFT","RIGHT","SPIN"};
-	std::string status;
-	if (phase == Phase_Dead) status = "DEAD";
-	else status = std::string(current_is_simon ? "SIMON SAYS " : "") + cmd_names[current_command];
+	// static char const *cmd_names[CommandCount] = {"JUMP","RED","BLUE","GREEN","YELLOW","FORWARD","BACKWARD","LEFT","RIGHT","SPIN"};
+	// std::string status;
+	// if (phase == Phase_Dead) status = "DEAD";
+	// else status = std::string(current_is_simon ? "SIMON SAYS " : "") + cmd_names[current_command];
 	
 
 	{ //use DrawLines to overlay some text:
@@ -395,7 +394,7 @@ void PlayMode::issue_command(Command cmd, bool simon_says) {
 void PlayMode::issue_random_command() {
 	static std::mt19937 rng(std::random_device{}());
 	Command cmd = Command(rng() % CommandCount);
-	bool simon = (rng() % 100) < 60; //60% "Simon says"
+	bool simon = (rng() % 100) < 50; //50% "Simon says"
 	issue_command(cmd, simon);
 
 	phase = Phase_Speaking;
@@ -417,24 +416,24 @@ void PlayMode::resolve(bool success) {
 		return;
 	}
 	score += 1;
-	window_length = std::max(minWindow, window_length * 0.96f);
-	gap_length = std::max(minGap,    gap_length * 0.95f);
+	window_length = std::max(minWindow, window_length * 0.92f);
+	gap_length = std::max(minGap, gap_length * 0.88f);
 	phase = Phase_Waiting;
 	phase_timer = gap_length;
 }
 
 bool PlayMode::command_performed() const {
 	switch (current_command) {
-		case Cmd_Jump:     return jumped;
-		case Cmd_Red:      return tile_under_player() == 0;
-		case Cmd_Blue:     return tile_under_player() == 1;
-		case Cmd_Green:    return tile_under_player() == 2;
-		case Cmd_Yellow:   return tile_under_player() == 3;
-		case Cmd_Left:     return hold_time[0] >= holdRequired;
-		case Cmd_Right:    return hold_time[1] >= holdRequired;
-		case Cmd_Forward:  return hold_time[2] >= holdRequired;
+		case Cmd_Jump: return jumped;
+		case Cmd_Red: return tile_under_player() == 0;
+		case Cmd_Blue: return tile_under_player() == 1;
+		case Cmd_Green: return tile_under_player() == 2;
+		case Cmd_Yellow: return tile_under_player() == 3;
+		case Cmd_Left: return hold_time[0] >= holdRequired;
+		case Cmd_Right: return hold_time[1] >= holdRequired;
+		case Cmd_Forward: return hold_time[2] >= holdRequired;
 		case Cmd_Backward: return hold_time[3] >= holdRequired;
-		case Cmd_Spin:     return std::abs(spin_accum) >= spinRequired;
+		case Cmd_Spin: return std::abs(spin_accum) >= spinRequired;
 		default: return false;
 	}
 }
